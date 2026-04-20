@@ -1,0 +1,32 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Credentials — NEVER commit your real credentials.json
+src/main/resources/credentials.json
+
+# Tokens cached by OAuth flow
+config/
+
+# IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.log

@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "drivehost",
+  "version": "${version}",
+  "name": "DriveHost",
+  "description": "Decentralised P2P Minecraft hosting via Google Drive. No dedicated server needed.",
+  "authors": ["DriveHost"],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/drivehost/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.drivehost.DriveHostMod"],
+    "client": ["dev.drivehost.client.DriveHostClient"]
+  },
+  "mixins": [
+    "drivehost.mixins.json",
+    {
+      "config": "drivehost.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.20.4",
+    "java": ">=17",
+    "fabric-api": "*"
+  },
+  "suggests": {}
+}
