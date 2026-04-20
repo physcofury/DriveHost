@@ -94,6 +94,10 @@ public class WorldManager {
         return currentWorldDir;
     }
 
+    public void setCurrentWorldDir(Path dir) {
+        this.currentWorldDir = dir;
+    }
+
     // --- Zip/Unzip ---
 
     private void unzip(byte[] zipData, Path targetDir) throws IOException {
@@ -127,9 +131,15 @@ public class WorldManager {
                 @Override
                 public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                     String entryName = sourceDir.relativize(file).toString().replace('\\', '/');
-                    zos.putNextEntry(new ZipEntry(entryName));
-                    Files.copy(file, zos);
-                    zos.closeEntry();
+                    // Skip files locked by the running MC server (e.g. session.lock, open region files)
+                    try {
+                        zos.putNextEntry(new ZipEntry(entryName));
+                        Files.copy(file, zos);
+                        zos.closeEntry();
+                    } catch (IOException e) {
+                        DriveHostMod.LOGGER.warn("[DriveHost] Skipping locked file during zip: {} ({})", entryName, e.getMessage());
+                        try { zos.closeEntry(); } catch (IOException ignored) {}
+                    }
                     return FileVisitResult.CONTINUE;
                 }
 

@@ -91,7 +91,10 @@ public class JoinController {
     }
 
     /**
-     * Create a new world: set up keycheck, upload world, become host.
+     * Create a new world: set up keycheck, session, and open tunnel.
+     * No world is downloaded — the caller should use createFreshLevel() to generate
+     * the world locally. DriveHostMod.pendingUploadController is set so the
+     * SERVER_STARTED event can upload the world to Drive automatically.
      */
     public JoinResult createWorld(String folderId, String password) throws Exception {
         this.folderId = folderId;
@@ -113,13 +116,44 @@ public class JoinController {
         // 4. Create initial session
         sessionManager.createInitialSession(playerName);
 
-        // 5. The caller will generate a world and call uploadInitialWorld, then we become host
-        return JoinResult.needsWorldSetup();
+        // 5. Open tunnel + write session with address, then caller uses createFreshLevel()
+        return becomeHostFresh();
+    }
+
+    /**
+     * Become host for a fresh new world — opens tunnel and writes session without
+     * downloading any world. The caller is responsible for generating the world via
+     * createFreshLevel(), and should set DriveHostMod.pendingUploadController = this
+     * so the initial world is uploaded once the server starts.
+     */
+    public JoinResult becomeHostFresh() throws Exception {
+        hostController = new HostController(tunnelManager, sessionManager, worldManager, playerName);
+        boolean success = hostController.becomeHost();
+        if (!success) return JoinResult.tunnelFailed();
+        lastSession = sessionManager.readSession();
+        active = true;
+        startPolling();
+        return JoinResult.hosting("FRESH");
+    }
+
+    /**
+     * Upload the given world directory to Drive (called after createFreshLevel starts).
+     */
+    public void uploadWorldAfterCreate(java.nio.file.Path worldDir) {
+        try {
+            worldManager.setCurrentWorldDir(worldDir);
+            worldManager.encryptAndUploadWorld(worldDir);
+            DriveHostMod.LOGGER.info("Initial world uploaded to Drive from {}", worldDir);
+        } catch (Exception e) {
+            DriveHostMod.LOGGER.error("Failed to upload initial world to Drive", e);
+        }
     }
 
     /**
      * After createWorld and world generation, upload the world and start hosting.
+     * @deprecated Use becomeHostFresh() + createFreshLevel() flow instead.
      */
+    @Deprecated
     public JoinResult uploadWorldAndHost(java.nio.file.Path worldDir) throws Exception {
         worldManager.uploadInitialWorld(worldDir);
         return becomeHostInternal();
@@ -172,6 +206,11 @@ public class JoinController {
 
     public HostController getHostController() {
         return hostController;
+    }
+
+    /** Update the world directory used for autosaves (set to the MC saves folder after world is loaded). */
+    public void setHostWorldDir(java.nio.file.Path dir) {
+        if (worldManager != null) worldManager.setCurrentWorldDir(dir);
     }
 
     // --- Internal ---

@@ -16,13 +16,16 @@ import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
 import dev.drivehost.DriveHostMod;
 
+import java.awt.Desktop;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.URI;
 import java.security.GeneralSecurityException;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Google Drive API wrapper for DriveHost.
@@ -36,6 +39,7 @@ public class DriveService {
 
     private Drive driveService;
     private boolean authenticated = false;
+    private Consumer<String> authUrlCallback;
 
     /**
      * Authenticate with Google Drive.
@@ -54,6 +58,14 @@ public class DriveService {
 
     public boolean isAuthenticated() {
         return authenticated;
+    }
+
+    /**
+     * Set a callback that receives the OAuth URL when a browser sign-in is needed.
+     * Use this to display the URL in-game if the browser fails to open.
+     */
+    public void setAuthUrlCallback(Consumer<String> callback) {
+        this.authUrlCallback = callback;
     }
 
     /**
@@ -184,7 +196,43 @@ public class DriveService {
             .setPort(8888)
             .build();
 
-        return new AuthorizationCodeInstalledApp(flow, receiver).authorize("user");
+        Consumer<String> urlCb = this.authUrlCallback;
+
+        return new AuthorizationCodeInstalledApp(flow, receiver) {
+            @Override
+            protected void onAuthorization(
+                    com.google.api.client.auth.oauth2.AuthorizationCodeRequestUrl authorizationUrl)
+                    throws IOException {
+                String url = authorizationUrl.build();
+                // Notify in-game screen
+                if (urlCb != null) urlCb.accept(url);
+                // Try Desktop API first
+                boolean opened = false;
+                try {
+                    if (Desktop.isDesktopSupported()
+                            && Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+                        // Use URL->URI conversion to safely handle encoded characters
+                        Desktop.getDesktop().browse(new java.net.URL(url).toURI());
+                        opened = true;
+                    }
+                } catch (Exception e) {
+                    DriveHostMod.LOGGER.warn("Desktop.browse failed: {}", e.getMessage());
+                }
+                // Fallback: rundll32 (avoids cmd.exe shell parsing / & splitting)
+                if (!opened) {
+                    try {
+                        new ProcessBuilder("rundll32.exe", "url.dll,FileProtocolHandler", url)
+                            .start();
+                        opened = true;
+                    } catch (Exception e) {
+                        DriveHostMod.LOGGER.warn("rundll32 fallback failed: {}", e.getMessage());
+                    }
+                }
+                if (!opened) {
+                    DriveHostMod.LOGGER.info("Please open this URL manually: {}", url);
+                }
+            }
+        }.authorize("user");
     }
 
     private void ensureAuthenticated() {

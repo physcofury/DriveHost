@@ -106,8 +106,8 @@ public class HostController {
             scheduler = null;
         }
 
-        // Final save
-        autosave();
+        // Final save (call doAutosave directly — autosave() guards on `hosting` which is now false)
+        doAutosave();
 
         // Clear host from session
         try {
@@ -168,6 +168,10 @@ public class HostController {
 
     private void autosave() {
         if (!hosting) return;
+        doAutosave();
+    }
+
+    private void doAutosave() {
         Path worldDir = worldManager.getCurrentWorldDir();
         if (worldDir == null) return;
 

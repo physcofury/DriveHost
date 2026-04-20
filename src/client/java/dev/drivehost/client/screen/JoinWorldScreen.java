@@ -13,17 +13,23 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.network.chat.Component;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 /**
  * Screen for joining an existing DriveHost world.
  * Player enters the Drive folder ID and world password.
  */
 public class JoinWorldScreen extends Screen {
 
+    private static final Path SAVED_FOLDER_ID_FILE = DriveHostMod.getConfigDir().resolve("last-join-folder.txt");
+
     private final Screen parent;
     private EditBox folderIdField;
     private EditBox passwordField;
     private Button joinButton;
     private String statusMessage = "";
+    private String authUrl = null;
     private int statusColor = 0xFFFFFF;
     private boolean processing = false;
 
@@ -42,9 +48,16 @@ public class JoinWorldScreen extends Screen {
         // Google Drive Folder ID
         folderIdField = new EditBox(this.font, centerX - fieldWidth / 2, startY, fieldWidth, 20,
             Component.literal("Drive Folder ID"));
-        folderIdField.setMaxLength(128);
+        folderIdField.setMaxLength(200);
         folderIdField.setHint(Component.literal("Google Drive Folder ID"));
         this.addRenderableWidget(folderIdField);
+        // Restore saved folder ID
+        try {
+            if (Files.exists(SAVED_FOLDER_ID_FILE)) {
+                String saved = Files.readString(SAVED_FOLDER_ID_FILE).trim();
+                if (!saved.isEmpty()) folderIdField.setValue(saved);
+            }
+        } catch (Exception ignored) {}
 
         // Password
         passwordField = new EditBox(this.font, centerX - fieldWidth / 2, startY + spacing, fieldWidth, 20,
@@ -74,7 +87,14 @@ public class JoinWorldScreen extends Screen {
     private void onJoin() {
         if (processing) return;
 
+        // Strip URL params — accept full share links or bare IDs
         String folderId = folderIdField.getValue().trim();
+        int q = folderId.indexOf('?'); if (q != -1) folderId = folderId.substring(0, q);
+        int slash = folderId.lastIndexOf('/');
+        if (slash != -1) folderId = folderId.substring(slash + 1);
+        folderId = folderId.trim();
+        folderIdField.setValue(folderId);
+
         String password = passwordField.getValue();
 
         // Validation
@@ -87,14 +107,24 @@ public class JoinWorldScreen extends Screen {
             return;
         }
 
+        // Save folder ID immediately
+        final String folderIdFinal = folderId;
+        try { Files.writeString(SAVED_FOLDER_ID_FILE, folderIdFinal); } catch (Exception ignored) {}
+
         processing = true;
         joinButton.active = false;
+        authUrl = null;
         setStatus("Authenticating with Google Drive...", 0xFFFF55);
 
         Thread worker = new Thread(() -> {
             try {
                 DriveService drive = new DriveService();
+                drive.setAuthUrlCallback(url -> {
+                    authUrl = url;
+                    setStatus("Browser opened for sign-in. If nothing opened, copy the URL shown below.", 0xFFFF55);
+                });
                 drive.authenticate();
+                authUrl = null;
 
                 setStatus("Verifying password...", 0xFFFF55);
 
@@ -102,21 +132,19 @@ public class JoinWorldScreen extends Screen {
                 TunnelManager tunnelManager = new TunnelManager();
                 JoinController controller = new JoinController(drive, tunnelManager, playerName);
 
-                JoinResult result = controller.joinWorld(folderId, password);
+                JoinResult result = controller.joinWorld(folderIdFinal, password);
 
                 switch (result.type()) {
                     case CONNECT -> {
+                        try { Files.deleteIfExists(SAVED_FOLDER_ID_FILE); } catch (Exception ignored) {}
                         setStatus("Connecting to host at " + result.address() + "...", 0x55FF55);
-                        // Connect to the server on the main thread
                         String address = result.address();
                         minecraft.execute(() -> connectToServer(address));
                     }
                     case HOSTING -> {
-                        setStatus("You are now hosting! Address: " +
-                            controller.getHostController().getTunnelResult().publicAddress(), 0x55FF55);
-                        // Load the world as integrated server — for MVP, connect to self
-                        String selfAddress = controller.getHostController().getTunnelResult().publicAddress();
-                        minecraft.execute(() -> connectToServer(selfAddress));
+                        String tunnelAddr = controller.getHostController().getTunnelResult().publicAddress();
+                        setStatus("You are now hosting at " + tunnelAddr + " — loading world...", 0x55FF55);
+                        loadWorldForHosting(result.address(), controller);
                     }
                     case WRONG_PASSWORD -> {
                         setStatus("Wrong password. Please try again.", 0xFF5555);
@@ -138,6 +166,78 @@ public class JoinWorldScreen extends Screen {
         }, "DriveHost-Join");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private void loadWorldForHosting(String worldPath, dev.drivehost.hosting.JoinController controller) {
+        java.nio.file.Path savesDir = minecraft.gameDirectory.toPath().resolve("saves").resolve("DriveHostWorld");
+        boolean hasRealWorld = false;
+        try {
+            java.nio.file.Path src = java.nio.file.Paths.get(worldPath);
+            if (java.nio.file.Files.exists(savesDir)) {
+                java.nio.file.Files.walk(savesDir)
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) {} });
+            }
+            java.nio.file.Files.createDirectories(savesDir);
+            java.nio.file.Files.walk(src).forEach(p -> {
+                try {
+                    java.nio.file.Path dest = savesDir.resolve(src.relativize(p));
+                    if (java.nio.file.Files.isDirectory(p)) java.nio.file.Files.createDirectories(dest);
+                    else java.nio.file.Files.copy(p, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } catch (Exception ignored) {}
+            });
+            hasRealWorld = java.nio.file.Files.exists(savesDir.resolve("level.dat"));
+        } catch (Exception e) {
+            DriveHostMod.LOGGER.error("Failed to prepare world for hosting", e);
+            setStatus("Error preparing world: " + e.getMessage(), 0xFF5555);
+            return;
+        }
+        if (hasRealWorld) {
+            // Proper MC world — load it directly
+            controller.setHostWorldDir(savesDir);
+            DriveHostMod.pendingPublishOnLan = true;
+            DriveHostMod.activeHostController = controller;
+            minecraft.execute(() -> minecraft.createWorldOpenFlows().checkForBackupAndLoad("DriveHostWorld", () -> {}));
+        } else {
+            // Placeholder/old world with no level.dat — generate a fresh MC world and re-upload
+            DriveHostMod.LOGGER.warn("No level.dat in downloaded world — generating fresh world and re-uploading");
+            setStatus("World had no data — generating fresh world...", 0xFFAA00);
+            launchFreshWorld(controller);
+        }
+    }
+
+    private void launchFreshWorld(dev.drivehost.hosting.JoinController controller) {
+        java.nio.file.Path savesDir = minecraft.gameDirectory.toPath().resolve("saves").resolve("DriveHostWorld");
+        try {
+            if (java.nio.file.Files.exists(savesDir)) {
+                java.nio.file.Files.walk(savesDir)
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { java.nio.file.Files.delete(p); } catch (Exception ignored) {} });
+            }
+        } catch (Exception e) {
+            DriveHostMod.LOGGER.warn("Could not clear old DriveHostWorld", e);
+        }
+        DriveHostMod.pendingPublishOnLan = true;
+        DriveHostMod.pendingUploadController = controller;
+        DriveHostMod.activeHostController = controller;
+        minecraft.execute(() -> {
+            net.minecraft.world.level.LevelSettings settings = new net.minecraft.world.level.LevelSettings(
+                "DriveHostWorld",
+                net.minecraft.world.level.GameType.SURVIVAL,
+                false,
+                net.minecraft.world.Difficulty.EASY,
+                false,
+                new net.minecraft.world.level.GameRules(),
+                net.minecraft.world.level.WorldDataConfiguration.DEFAULT
+            );
+            net.minecraft.world.level.levelgen.WorldOptions worldOptions =
+                net.minecraft.world.level.levelgen.WorldOptions.defaultWithRandomSeed();
+            minecraft.createWorldOpenFlows().createFreshLevel(
+                "DriveHostWorld", settings, worldOptions,
+                net.minecraft.world.level.levelgen.presets.WorldPresets::createNormalWorldDimensions,
+                this
+            );
+        });
     }
 
     /**
@@ -176,6 +276,14 @@ public class JoinWorldScreen extends Screen {
             graphics.drawCenteredString(this.font,
                 Component.literal(statusMessage),
                 this.width / 2, 52, statusColor);
+        }
+        // Auth URL fallback display
+        if (authUrl != null) {
+            graphics.drawCenteredString(this.font,
+                Component.literal("Open in browser (Ctrl+C to copy from console):"),
+                this.width / 2, this.height - 70, 0xFFFF55);
+            String display = authUrl.length() > 80 ? authUrl.substring(0, 77) + "..." : authUrl;
+            graphics.drawCenteredString(this.font, Component.literal(display), this.width / 2, this.height - 58, 0xAAAAAA);
         }
 
         // Field labels
