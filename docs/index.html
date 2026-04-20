@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DriveHost — Privacy Policy</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 60px auto; padding: 0 20px; color: #222; line-height: 1.7; }
+    h1 { font-size: 1.6em; }
+    h2 { font-size: 1.1em; margin-top: 2em; }
+    a { color: #1a73e8; }
+  </style>
+</head>
+<body>
+  <h1>DriveHost — Privacy Policy</h1>
+  <p><em>Last updated: April 2026</em></p>
+
+  <p>DriveHost is a free, open-source Minecraft mod that enables peer-to-peer world hosting using Google Drive as shared storage.</p>
+
+  <h2>What data we access</h2>
+  <p>DriveHost requests access to Google Drive with the <code>drive.file</code> scope. This scope grants access <strong>only to files that the mod itself creates</strong> — it cannot read, modify, or delete any other files in your Google Drive.</p>
+
+  <h2>What we store on Google Drive</h2>
+  <ul>
+    <li><strong>world.zip.enc</strong> — your Minecraft world save, encrypted with AES-256-GCM using a password you set. It is unreadable without that password.</li>
+    <li><strong>session.json.enc</strong> — encrypted session state (who is hosting, connected players). Also AES-256-GCM encrypted.</li>
+    <li><strong>keycheck.json</strong> — a salt and HMAC hash used to verify your password locally. It does not contain your password or encryption key.</li>
+  </ul>
+
+  <h2>What we do NOT do</h2>
+  <ul>
+    <li>We do not collect, transmit, or store your data on any server we operate.</li>
+    <li>We do not share your data with any third party.</li>
+    <li>We do not access any Google Drive files outside of the DriveHost folder you designate.</li>
+    <li>We do not store your Google account credentials — OAuth tokens are cached locally on your own machine only.</li>
+  </ul>
+
+  <h2>OAuth tokens</h2>
+  <p>After you authorise DriveHost via Google Sign-In, a refresh token is stored locally at <code>.minecraft/config/drivehost/tokens/</code> on your own computer. This token is never uploaded or transmitted anywhere.</p>
+
+  <h2>Open source</h2>
+  <p>DriveHost is fully open source. You can inspect exactly what the mod does with your data at any time:</p>
+  <p><a href="https://github.com/physcofury/DriveHost">https://github.com/physcofury/DriveHost</a></p>
+
+  <h2>Contact</h2>
+  <p>If you have any questions, open an issue on the GitHub repository above.</p>
+</body>
+</html>
