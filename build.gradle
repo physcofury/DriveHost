@@ -80,6 +80,10 @@ shadowJar {
     configurations = [project.configurations.shade]
     archiveClassifier.set("dev-shadow")
 
+    // Include compiled classes from both main and client source sets
+    from sourceSets.main.output
+    from sourceSets.client.output
+
     // Relocate shaded libraries to avoid classpath conflicts
     relocate "com.google", "dev.drivehost.shadow.com.google"
     relocate "com.fasterxml", "dev.drivehost.shadow.com.fasterxml"
