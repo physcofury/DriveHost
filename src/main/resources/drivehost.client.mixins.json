@@ -2,6 +2,7 @@
   "required": true,
   "package": "dev.drivehost.client.mixin",
   "compatibilityLevel": "JAVA_17",
+  "refmap": "client-drivehost-refmap.json",
   "client": [
     "TitleScreenMixin"
   ],
