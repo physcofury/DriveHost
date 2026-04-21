@@ -58,7 +58,8 @@ public class DriveHostMod implements ModInitializer {
         });
 
         // When the integrated server stops (player left world), shut down the tunnel and do a final upload.
-        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+        // SERVER_STOPPED fires after MC has fully saved playerdata, chunks, and released all file locks.
+        ServerLifecycleEvents.SERVER_STOPPED.register(server -> {
             dev.drivehost.hosting.JoinController ctrl = activeHostController;
             if (ctrl != null) {
                 activeHostController = null;
